@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { supabase } from "../../lib/supabase";
 
-type EventPhoto = { id: string; event_id: string; storage_path: string; public_url: string; sort_order: number; is_thumbnail?: boolean; created_at?: string };
+type EventPhoto = { id: string; event_id: string; storage_path: string; public_url: string; sort_order: number; is_thumbnail?: boolean; cloudinary_public_id?: string | null; created_at?: string };
 type GalleryEvent = { id: string; title: string; category: string; event_date: string | null; location: string; description: string | null; published: boolean; event_photos: EventPhoto[] };
 type Props = { page: "gallery" | "admin"; language: "en" | "el" };
 const categories = ["Wedding", "Christening", "Birthday party", "Private celebration", "Corporate event", "Other"];
@@ -40,6 +40,8 @@ export function GalleryExperience({ page, language }: Props) {
   const [selectedThumbnailFileIndex, setSelectedThumbnailFileIndex] = useState<number | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  const [migrationRunning, setMigrationRunning] = useState(false);
+  const [migrationProgress, setMigrationProgress] = useState({ done: 0, total: 0 });
 
   const sortEventPhotos = (items: GalleryEvent[]) => items.map(event => ({ ...event, event_photos: [...(event.event_photos || [])].sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0) || (a.created_at || "").localeCompare(b.created_at || "")) }));
 
@@ -124,6 +126,70 @@ export function GalleryExperience({ page, language }: Props) {
       setActiveEvent(current => current?.id === eventId ? original : current);
       setNotice(error?.message || t.failed);
     }
+  };
+
+  const callCloudinaryAdmin = async (payload: Record<string, unknown>) => {
+    if (!supabase) throw new Error("Supabase is not configured.");
+    const { data: sessionData } = await supabase.auth.getSession();
+    const accessToken = sessionData.session?.access_token;
+    if (!accessToken) throw new Error("Please sign in again.");
+    const response = await fetch(import.meta.env.VITE_SUPABASE_URL + "/functions/v1/cloudinary-admin", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: "Bearer " + accessToken, apikey: import.meta.env.VITE_SUPABASE_ANON_KEY as string },
+      body: JSON.stringify(payload),
+    });
+    const result = await response.json();
+    if (!response.ok) throw new Error(result?.error || "Cloudinary service request failed.");
+    return result;
+  };
+
+  const uploadToCloudinary = async (file: File, eventId: string, photoId: string) => {
+    const publicId = "greatest-moments/" + eventId + "/" + photoId;
+    const signed = await callCloudinaryAdmin({ action: "sign-upload", publicId });
+    const uploadData = new FormData();
+    uploadData.set("file", file);
+    uploadData.set("api_key", signed.apiKey);
+    uploadData.set("timestamp", String(signed.timestamp));
+    uploadData.set("public_id", signed.publicId);
+    uploadData.set("overwrite", "false");
+    uploadData.set("signature", signed.signature);
+    const response = await fetch("https://api.cloudinary.com/v1_1/" + signed.cloudName + "/image/upload", { method: "POST", body: uploadData });
+    const result = await response.json();
+    if (!response.ok || !result.secure_url || !result.public_id) throw new Error(result?.error?.message || "Cloudinary image upload failed.");
+    return result as { public_id: string; secure_url: string };
+  };
+
+  const migrateExistingPhotos = async () => {
+    if (!supabase || !isAdmin || migrationRunning) return;
+    setMigrationRunning(true);
+    setNotice("");
+    try {
+      const { data: photos, error } = await supabase.from("event_photos").select("id,event_id,storage_path,public_url,cloudinary_public_id").is("cloudinary_public_id", null).order("created_at", { ascending: true });
+      if (error) throw error;
+      const pending = photos || [];
+      setMigrationProgress({ done: 0, total: pending.length });
+      let completed = 0;
+      const failures: string[] = [];
+      for (const photo of pending) {
+        try {
+          const source = await fetch(photo.public_url);
+          if (!source.ok) throw new Error("Could not download the original Supabase image.");
+          const blob = await source.blob();
+          const extension = blob.type.split("/")[1]?.split("+")[0] || "jpg";
+          const file = new File([blob], photo.id + "." + extension, { type: blob.type || "image/jpeg" });
+          const uploaded = await uploadToCloudinary(file, photo.event_id, photo.id);
+          const { error: updateError } = await supabase.from("event_photos").update({ cloudinary_public_id: uploaded.public_id, public_url: uploaded.secure_url }).eq("id", photo.id).is("cloudinary_public_id", null);
+          if (updateError) throw updateError;
+          completed++;
+        } catch (error: any) { failures.push(photo.id + ": " + (error?.message || "Unknown error")); }
+        setMigrationProgress({ done: completed + failures.length, total: pending.length });
+      }
+      const { data: refreshed, error: refreshError } = await supabase.from("event_folders").select("*, event_photos(*)").order("created_at", { ascending: false });
+      if (refreshError) throw refreshError;
+      setEvents(sortEventPhotos((refreshed || []) as GalleryEvent[]));
+      setNotice(failures.length ? "Migration finished: " + completed + " photos moved, " + failures.length + " failed. First error: " + failures[0] : "Migration complete: all " + completed + " existing photos are now on Cloudinary. Original Supabase copies have been retained.");
+    } catch (error: any) { setNotice(error?.message || "Cloudinary migration could not be started."); }
+    finally { setMigrationRunning(false); }
   };
 
   const signIn = async (e: React.FormEvent) => {
