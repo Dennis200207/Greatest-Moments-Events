@@ -1,4 +1,4 @@
-import { Theme } from './settings/types';
+import type { Theme } from './settings/types';
 import { GreatestMomentsEventsWebsite } from './components/generated/GreatestMomentsEventsWebsite';
 
 let theme: Theme = 'light';
