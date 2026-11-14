@@ -161,7 +161,7 @@ export function GalleryExperience({ page, language }: Props) {
             const { error: clearThumbError } = await supabase.from("event_photos").update({ is_thumbnail: false }).eq("event_id", eventId);
             if (clearThumbError) throw clearThumbError;
           }
-          const existingPhotoCount = editingId ? (events.find(event => event.id === eventId)?.event_photos.length || 0) : 0;
+          const existingPhotoCount = editingId ? Math.max(-1, ...(events.find(event => event.id === eventId)?.event_photos || []).map(photo => photo.sort_order ?? -1)) + 1 : 0;
           const { error: rowError } = await supabase.from("event_photos").insert({ event_id: eventId, storage_path: path, public_url: publicData.publicUrl, sort_order: existingPhotoCount + Array.from(files).indexOf(file), is_thumbnail: makeThumbnail });
           if (rowError) throw rowError;
         }
