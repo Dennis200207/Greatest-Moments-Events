@@ -226,17 +226,16 @@ export function GalleryExperience({ page, language }: Props) {
       if (eventId && files?.length) {
         for (const file of Array.from(files)) {
           if (!file.type.startsWith("image/")) continue;
-          const path = eventId + "/" + crypto.randomUUID() + "-" + file.name.replace(/[^a-zA-Z0-9._-]/g, "-");
-          const { error: uploadError } = await supabase.storage.from("event-photos").upload(path, file, { upsert: false, contentType: file.type });
-          if (uploadError) throw uploadError;
-          const { data: publicData } = supabase.storage.from("event-photos").getPublicUrl(path);
+          const photoId = crypto.randomUUID();
+          const uploaded = await uploadToCloudinary(file, eventId, photoId);
+          const path = "cloudinary:" + uploaded.public_id;
           const makeThumbnail = selectedThumbnailFileIndex === Array.from(files).indexOf(file) || (!editingId && selectedThumbnailFileIndex === null && Array.from(files).indexOf(file) === 0);
           if (makeThumbnail) {
             const { error: clearThumbError } = await supabase.from("event_photos").update({ is_thumbnail: false }).eq("event_id", eventId);
             if (clearThumbError) throw clearThumbError;
           }
           const existingPhotoCount = editingId ? Math.max(-1, ...(events.find(event => event.id === eventId)?.event_photos || []).map(photo => photo.sort_order ?? -1)) + 1 : 0;
-          const { error: rowError } = await supabase.from("event_photos").insert({ event_id: eventId, storage_path: path, public_url: publicData.publicUrl, sort_order: existingPhotoCount + Array.from(files).indexOf(file), is_thumbnail: makeThumbnail });
+          const { error: rowError } = await supabase.from("event_photos").insert({ id: photoId, event_id: eventId, storage_path: path, cloudinary_public_id: uploaded.public_id, public_url: uploaded.secure_url, sort_order: existingPhotoCount + Array.from(files).indexOf(file), is_thumbnail: makeThumbnail });
           if (rowError) throw rowError;
         }
       }
@@ -256,8 +255,16 @@ export function GalleryExperience({ page, language }: Props) {
   };
   const deleteEvent = async (event: GalleryEvent) => {
     if (!supabase || !window.confirm("Delete this event folder and all its photos?")) return;
-    const paths = (event.event_photos || []).map(p => p.storage_path);
-    if (paths.length) await supabase.storage.from("event-photos").remove(paths);
+    const photos = event.event_photos || [];
+    const cloudinaryIds = photos.map(photo => photo.cloudinary_public_id).filter((id): id is string => !!id);
+    try {
+      for (let i = 0; i < cloudinaryIds.length; i += 100) await callCloudinaryAdmin({ action: "delete-assets", publicIds: cloudinaryIds.slice(i, i + 100) });
+      const legacyPaths = photos.map(photo => photo.storage_path).filter(path => !path.startsWith("cloudinary:"));
+      if (legacyPaths.length) {
+        const { error: storageError } = await supabase.storage.from("event-photos").remove(legacyPaths);
+        if (storageError) throw storageError;
+      }
+    } catch (error: any) { setNotice(error?.message || "Could not delete all event photos. The event was not deleted."); return; }
     const { error } = await supabase.from("event_folders").delete().eq("id", event.id);
     if (error) setNotice(error.message);
     else setEvents(current => current.filter(e => e.id !== event.id));
@@ -270,7 +277,7 @@ export function GalleryExperience({ page, language }: Props) {
       <div className="flex flex-wrap items-center justify-between gap-4"><div><p className="text-[10px] uppercase tracking-[.3em] text-[#a17d4e]">Greatest Moments Events</p><h1 className="mt-2 font-serif text-4xl">{t.admin}</h1></div>{session && <button onClick={signOut} className="border border-[#b18b5c] px-5 py-3 text-xs">{t.signOut}</button>}</div>
       {!session && <form onSubmit={signIn} className="mt-10 max-w-md space-y-4 bg-white p-7 shadow-sm"><h2 className="font-serif text-2xl">{t.login}</h2><label className="block text-xs">{t.email}<input type="email" required value={email} onChange={e => setEmail(e.target.value)} className="mt-2 w-full border border-[#e5ded3] px-4 py-3 text-sm" /></label><label className="block text-xs">{t.password}<input type="password" required value={password} onChange={e => setPassword(e.target.value)} className="mt-2 w-full border border-[#e5ded3] px-4 py-3 text-sm" /></label><button className="bg-[#292720] px-7 py-3 text-xs uppercase tracking-widest text-white">{t.signIn}</button></form>}
       {session && !isAdmin && <p className="mt-8 max-w-2xl border border-amber-300 bg-amber-50 p-5 text-sm text-amber-900">{t.adminOnly}</p>}
-      {session && isAdmin && <><form onSubmit={saveEvent} className="mt-10 grid gap-5 bg-white p-6 shadow-sm sm:grid-cols-2 sm:p-8">
+      {session && isAdmin && <><div className="mt-8 border border-[#e5ded3] bg-white p-6 shadow-sm"><div className="flex flex-wrap items-center justify-between gap-4"><div><h2 className="font-serif text-xl">Cloudinary photo migration</h2><p className="mt-1 text-xs text-[#777168]">Move existing Supabase photos to Cloudinary. Original files remain in Supabase until you verify the migration.</p></div><button type="button" onClick={() => void migrateExistingPhotos()} disabled={migrationRunning} className="bg-[#292720] px-5 py-3 text-xs uppercase tracking-widest text-white disabled:opacity-50">{migrationRunning ? "Migrating…" : "Migrate existing photos"}</button></div>{migrationRunning && <div className="mt-4"><div className="h-2 overflow-hidden bg-[#eee8df]"><div className="h-full bg-[#a17d4e] transition-all" style={{ width: migrationProgress.total ? (Math.round((migrationProgress.done / migrationProgress.total) * 100) + "%") : "0%" }} /></div><p className="mt-2 text-xs text-[#777168]">{migrationProgress.done} / {migrationProgress.total} photos processed</p></div>}</div><form onSubmit={saveEvent} className="mt-10 grid gap-5 bg-white p-6 shadow-sm sm:grid-cols-2 sm:p-8">
         <h2 className="font-serif text-2xl sm:col-span-2">{editingId ? t.update : t.save}</h2>
         <label className="text-xs">{t.title}<input required value={form.title} onChange={e => setForm({ ...form, title: e.target.value })} className="mt-2 w-full border border-[#e5ded3] px-4 py-3 text-sm" /></label>
         <label className="text-xs">{t.category}<select value={form.category} onChange={e => setForm({ ...form, category: e.target.value })} className="mt-2 w-full border border-[#e5ded3] bg-white px-4 py-3 text-sm">{categories.map(c => <option key={c}>{c}</option>)}</select></label>
