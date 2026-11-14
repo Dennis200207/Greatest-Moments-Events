@@ -151,7 +151,7 @@ export function GalleryExperience({ page, language }: Props) {
     uploadData.set("api_key", signed.apiKey);
     uploadData.set("timestamp", String(signed.timestamp));
     uploadData.set("public_id", signed.publicId);
-    uploadData.set("overwrite", "false");
+    uploadData.set("overwrite", "true");
     uploadData.set("signature", signed.signature);
     const response = await fetch("https://api.cloudinary.com/v1_1/" + signed.cloudName + "/image/upload", { method: "POST", body: uploadData });
     const result = await response.json();
