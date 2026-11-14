@@ -45,6 +45,12 @@ const serviceGroups = [{
   items: ["Invitations & stationery", "Wedding cake", "Guest experiences", "Children's entertainment"]
 }];
 const events = ["Wedding", "Christening", "Birthday party", "Private celebration", "Corporate event", "Other"];
+type SitePage = "home" | "about" | "services" | "gallery" | "contact" | "plan";
+const getPageFromHash = (): SitePage => {
+  const candidate = window.location.hash.replace(/^#\\/?/, "") as SitePage;
+  return (["home", "about", "services", "gallery", "contact", "plan"] as SitePage[]).includes(candidate) ? candidate : "home";
+};
+
 export const GreatestMomentsEventsWebsite = () => {
   const [eventType, setEventType] = useState("Wedding");
   const [selected, setSelected] = useState(["Full event planning"]);
@@ -60,6 +66,16 @@ export const GreatestMomentsEventsWebsite = () => {
   const [sent, setSent] = useState(false);
   const [language, setLanguage] = useState<"en" | "el">(() => localStorage.getItem("greatest-moments-language") === "el" ? "el" : "en");
   useEffect(() => { localStorage.setItem("greatest-moments-language", language); document.documentElement.lang = language; }, [language]);
+  const [page, setPage] = useState<SitePage>(() => getPageFromHash());
+  useEffect(() => {
+    const syncPage = () => {
+      setPage(getPageFromHash());
+      window.scrollTo({ top: 0, behavior: "smooth" });
+    };
+    window.addEventListener("hashchange", syncPage);
+    if (!window.location.hash) window.history.replaceState(null, "", window.location.pathname + window.location.search + "#/home");
+    return () => window.removeEventListener("hashchange", syncPage);
+  }, []);
   const [imageOverrides, setImageOverrides] = useState({});
   const [editorOpen, setEditorOpen] = useState(false);
   const [uploadNotice, setUploadNotice] = useState("");
@@ -142,15 +158,16 @@ export const GreatestMomentsEventsWebsite = () => {
       <div className="bg-[#26251f] px-5 py-2 text-center text-[10px] tracking-[.24em] text-[#e8d9bd] sm:text-xs">CREATING MOMENTS THAT LAST A LIFETIME · ATHENS, GREECE</div>
       <header className="sticky top-0 z-40 border-b border-[#e9e3d9] bg-[#faf8f4]/95 backdrop-blur">
         <div className="mx-auto flex max-w-7xl items-center justify-between px-5 py-4 lg:px-8">
-          <a href="#home" className="leading-tight"><span className="block font-serif text-2xl tracking-[.12em]">GREATEST MOMENTS</span><span className="mt-1 block text-center text-[9px] tracking-[.48em] text-[#a17d4e]">EVENTS · CATERING · DESIGN</span></a>
-          <nav className="hidden items-center gap-8 text-[11px] uppercase tracking-[.16em] md:flex"><a className="hover:text-[#a17d4e]" href="#about">Our story</a><a className="hover:text-[#a17d4e]" href="#services">Services</a><a className="hover:text-[#a17d4e]" href="#gallery">Gallery</a><a className="hover:text-[#a17d4e]" href="#contact">Contact</a></nav>
+          <a href="#/home" className="leading-tight"><span className="block font-serif text-2xl tracking-[.12em]">GREATEST MOMENTS</span><span className="mt-1 block text-center text-[9px] tracking-[.48em] text-[#a17d4e]">EVENTS · CATERING · DESIGN</span></a>
+          <nav className="hidden items-center gap-6 text-[10px] uppercase tracking-[.14em] md:flex"><a className={`hover:text-[#a17d4e] ${page === "about" ? "text-[#a17d4e]" : ""}`} href="#/about">Our story</a><a className={`hover:text-[#a17d4e] ${page === "services" ? "text-[#a17d4e]" : ""}`} href="#/services">Services</a><a className={`hover:text-[#a17d4e] ${page === "gallery" ? "text-[#a17d4e]" : ""}`} href="#/gallery">Gallery</a><a className={`hover:text-[#a17d4e] ${page === "contact" ? "text-[#a17d4e]" : ""}`} href="#/contact">Contact</a></nav>
           <div className="flex shrink-0 items-center gap-1 border border-[#e5ded3] p-1 text-[10px] tracking-wider" aria-label="Language selector"><button type="button" onClick={() => setLanguage("en")} aria-pressed={language === "en"} className={`px-2 py-2 transition ${language === "en" ? "bg-[#292720] text-white" : "text-[#777168] hover:text-[#a17d4e]"}`}>EN</button><button type="button" onClick={() => setLanguage("el")} aria-pressed={language === "el"} className={`px-2 py-2 transition ${language === "el" ? "bg-[#292720] text-white" : "text-[#777168] hover:text-[#a17d4e]"}`}>ΕΛ</button></div>
-          <a href="#builder" className="border border-[#a17d4e] px-4 py-3 text-[10px] uppercase tracking-[.16em] transition hover:bg-[#a17d4e] hover:text-white">Plan your event <span aria-hidden>↗</span></a>
+          <a href="#/plan" className="border border-[#a17d4e] px-4 py-3 text-[10px] uppercase tracking-[.16em] transition hover:bg-[#a17d4e] hover:text-white">Plan your event <span aria-hidden>↗</span></a>
         </div>
+        <nav className="flex gap-5 overflow-x-auto border-t border-[#e9e3d9] px-5 py-3 text-[9px] uppercase tracking-[.14em] md:hidden"><a className="whitespace-nowrap" href="#/about">Our story</a><a className="whitespace-nowrap" href="#/services">Services</a><a className="whitespace-nowrap" href="#/gallery">Gallery</a><a className="whitespace-nowrap" href="#/contact">Contact</a></nav>
       </header>
 
       <main>
-        <section id="home" className="relative min-h-[680px] overflow-hidden bg-[#27251f]">
+        {page === "home" && (<section id="home" className="relative min-h-[680px] overflow-hidden bg-[#27251f]">
           <img src={images.hero} alt="Romantic wedding reception with elegant floral styling" className="absolute inset-0 h-full w-full object-cover opacity-60" />
           <div className="absolute inset-0 bg-gradient-to-r from-[#171713]/80 via-[#171713]/35 to-transparent" />
           <div className="relative mx-auto flex min-h-[680px] max-w-7xl items-center px-6 py-24 lg:px-8">
@@ -158,18 +175,18 @@ export const GreatestMomentsEventsWebsite = () => {
               <p className="mb-7 text-[10px] uppercase tracking-[.36em] text-[#e5cda9]">Your vision. Our creation.</p>
               <h1 className="font-serif text-5xl leading-[1.08] sm:text-7xl">Every detail.<br /><em className="font-normal text-[#e5cda9]">A moment to remember.</em></h1>
               <p className="mt-7 max-w-lg text-sm leading-7 text-white/85 sm:text-base">From beautifully considered weddings to unforgettable celebrations, we bring people, flavours and thoughtful design together.</p>
-              <div className="mt-10 flex flex-wrap gap-4"><a href="#builder" className="bg-[#b18b5c] px-7 py-4 text-[10px] uppercase tracking-[.2em] text-white transition hover:bg-[#987346]">Create your event <span aria-hidden>↗</span></a><a href="#services" className="border border-white/60 px-7 py-4 text-[10px] uppercase tracking-[.2em] text-white hover:bg-white/10">Discover our services</a></div>
+              <div className="mt-10 flex flex-wrap gap-4"><a href="#/plan" className="bg-[#b18b5c] px-7 py-4 text-[10px] uppercase tracking-[.2em] text-white transition hover:bg-[#987346]">Create your event <span aria-hidden>↗</span></a><a href="#/services" className="border border-white/60 px-7 py-4 text-[10px] uppercase tracking-[.2em] text-white hover:bg-white/10">Discover our services</a></div>
             </div>
           </div>
           <div className="absolute bottom-8 right-8 hidden text-right text-[9px] uppercase tracking-[.28em] text-white/75 md:block">Made with care · Celebrated forever</div>
-        </section>
+        </section>)} 
 
-        <section id="about" className="mx-auto grid max-w-7xl gap-14 px-6 py-24 lg:grid-cols-2 lg:items-center lg:px-8">
-          <div><p className="text-[10px] uppercase tracking-[.3em] text-[#a17d4e]">The art of bringing people together</p><h2 className="mt-5 font-serif text-4xl leading-tight sm:text-5xl">More than an event.<br /><em className="text-[#a17d4e]">A feeling that stays.</em></h2><p className="mt-7 max-w-xl text-sm leading-8 text-[#6f6a61]">At Greatest Moments Events, we believe the most memorable celebrations are made from the details: a welcoming table, a beautiful setting, exceptional food and the people you love. We bring the elements together around your ideas and your occasion.</p><a href="#contact" className="mt-8 inline-flex border-b border-[#a17d4e] pb-2 text-[10px] uppercase tracking-[.2em]">Let's create something beautiful <span className="ml-3">↗</span></a></div>
+        {page === "about" && (<section id="about" className="mx-auto grid max-w-7xl gap-14 px-6 py-24 lg:grid-cols-2 lg:items-center lg:px-8">
+          <div><p className="text-[10px] uppercase tracking-[.3em] text-[#a17d4e]">The art of bringing people together</p><h2 className="mt-5 font-serif text-4xl leading-tight sm:text-5xl">More than an event.<br /><em className="text-[#a17d4e]">A feeling that stays.</em></h2><p className="mt-7 max-w-xl text-sm leading-8 text-[#6f6a61]">At Greatest Moments Events, we believe the most memorable celebrations are made from the details: a welcoming table, a beautiful setting, exceptional food and the people you love. We bring the elements together around your ideas and your occasion.</p><a href="#/contact" className="mt-8 inline-flex border-b border-[#a17d4e] pb-2 text-[10px] uppercase tracking-[.2em]">Let's create something beautiful <span className="ml-3">↗</span></a></div>
           <div className="relative"><img src={images.table} alt="Elegant event tablescape" className="h-[440px] w-full object-cover" /><div className="absolute -bottom-6 -left-5 bg-[#eee7dc] px-8 py-6 sm:-left-8"><span className="font-serif text-3xl italic text-[#9c784d]">Your day,</span><span className="mt-1 block text-[9px] uppercase tracking-[.2em]">beautifully brought to life</span></div></div>
-        </section>
+        </section>)} 
 
-        <section id="services" className="bg-[#f0ece5] px-6 py-24 lg:px-8"><div className="mx-auto max-w-7xl"><div className="mx-auto max-w-xl text-center"><p className="text-[10px] uppercase tracking-[.3em] text-[#a17d4e]">What we do</p><h2 className="mt-4 font-serif text-4xl sm:text-5xl">One team. Every detail.</h2><p className="mt-5 text-sm leading-7 text-[#777168]">A considered collection of services, brought together around the celebration you imagine.</p></div>
+        {page === "services" && (<section id="services" className="bg-[#f0ece5] px-6 py-24 lg:px-8"><div className="mx-auto max-w-7xl"><div className="mx-auto max-w-xl text-center"><p className="text-[10px] uppercase tracking-[.3em] text-[#a17d4e]">What we do</p><h2 className="mt-4 font-serif text-4xl sm:text-5xl">One team. Every detail.</h2><p className="mt-5 text-sm leading-7 text-[#777168]">A considered collection of services, brought together around the celebration you imagine.</p></div>
           <div className="mt-14 grid gap-5 sm:grid-cols-2 lg:grid-cols-4">
             {[{
               n: "01",
@@ -192,9 +209,9 @@ export const GreatestMomentsEventsWebsite = () => {
               d: "The right soundtrack, production and energy for an unforgettable gathering.",
               img: images.party
             }].map(c => <article key={c.n} className="group bg-[#faf8f4]"><div className="overflow-hidden"><img src={c.img} alt={c.t} className="h-64 w-full object-cover transition duration-700 group-hover:scale-105" /></div><div className="p-6"><span className="text-[10px] tracking-[.2em] text-[#a17d4e]">{c.n} / GREATEST MOMENTS</span><h3 className="mt-3 font-serif text-2xl">{c.t}</h3><p className="mt-3 text-xs leading-6 text-[#777168]">{c.d}</p></div></article>)}
-          </div></div></section>
+          </div></div></section>)} 
 
-        <section id="builder" className="scroll-mt-24 px-6 py-24 lg:px-8"><div className="mx-auto max-w-5xl"><div className="text-center"><p className="text-[10px] uppercase tracking-[.3em] text-[#a17d4e]">Your celebration starts here</p><h2 className="mt-4 font-serif text-4xl sm:text-5xl">Build your event</h2><p className="mx-auto mt-5 max-w-xl text-sm leading-7 text-[#777168]">Tell us what you have in mind. Choose only the services you need and we'll help you shape the rest.</p></div>
+        {page === "plan" && (<section id="builder" className="scroll-mt-24 px-6 py-24 lg:px-8"><div className="mx-auto max-w-5xl"><div className="text-center"><p className="text-[10px] uppercase tracking-[.3em] text-[#a17d4e]">Your celebration starts here</p><h2 className="mt-4 font-serif text-4xl sm:text-5xl">Build your event</h2><p className="mx-auto mt-5 max-w-xl text-sm leading-7 text-[#777168]">Tell us what you have in mind. Choose only the services you need and we'll help you shape the rest.</p></div>
           <div className="mt-12 border border-[#e5ded3] bg-white p-6 sm:p-10">
             <div className="mb-10 flex items-center justify-between"><div><span className="text-[10px] uppercase tracking-[.2em] text-[#a17d4e]">Step {step} of 2</span><h3 className="mt-2 font-serif text-2xl">{step === 1 ? "What are we celebrating?" : "A few details about your day"}</h3></div><div className="flex gap-2"><span className={`h-1 w-12 ${step >= 1 ? "bg-[#a17d4e]" : "bg-[#e7e1d8]"}`} /><span className={`h-1 w-12 ${step >= 2 ? "bg-[#a17d4e]" : "bg-[#e7e1d8]"}`} /></div></div>
             {step === 1 ? <div><p className="mb-4 text-xs uppercase tracking-[.15em] text-[#777168]">Choose your occasion</p><div className="mb-10 grid grid-cols-2 gap-3 sm:grid-cols-3">{events.map(e => <button type="button" key={e} onClick={() => setEventType(e)} className={`border px-4 py-4 text-left text-sm transition ${eventType === e ? "border-[#a17d4e] bg-[#f5f0e8] text-[#8e6b43]" : "border-[#e7e1d8] hover:border-[#b99a73]"}`}><span className="mr-2">{eventType === e ? "◉" : "○"}</span>{e}</button>)}</div>
@@ -204,11 +221,11 @@ export const GreatestMomentsEventsWebsite = () => {
               <div className="flex flex-wrap justify-between gap-3"><button onClick={() => setStep(1)} className="border border-[#d9d1c5] px-7 py-4 text-[10px] uppercase tracking-[.2em]">← Back</button><a href={`https://wa.me/306977955583?text=${mailBody}`} onClick={() => setSent(true)} className="bg-[#a17d4e] px-7 py-4 text-[10px] uppercase tracking-[.2em] text-white hover:bg-[#87643e]">Send my enquiry ↗</a></div><p className="mt-4 text-[10px] leading-5 text-[#918a80]">WhatsApp will open with your event details and selected services ready to send.</p>
             </div>}
           </div>
-        </div></section>
+        </div></section>)} 
 
-        <section id="gallery" className="bg-[#26251f] px-6 py-24 text-white lg:px-8"><div className="mx-auto max-w-7xl"><div className="flex flex-wrap items-end justify-between gap-6"><div><p className="text-[10px] uppercase tracking-[.3em] text-[#d1b48b]">A glimpse of the possibilities</p><h2 className="mt-4 font-serif text-4xl sm:text-5xl">Moments, beautifully made.</h2></div><a href="https://www.facebook.com/greatestmomentsevents" target="_blank" rel="noreferrer" className="border-b border-[#b18b5c] pb-2 text-[10px] uppercase tracking-[.2em] text-[#e5cda9]">Visit our Facebook ↗</a></div><div className="mt-12 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">{galleryPhotos.map((src, index) => <a href={src} target="_blank" rel="noreferrer" key={src} className={`group relative block overflow-hidden bg-[#3a382f] ${index % 3 === 1 ? "mt-8" : ""}`}><img src={src} alt={`Greatest Moments Events celebration photograph ${index + 1}`} loading={index < 4 ? "eager" : "lazy"} className="h-56 w-full object-cover transition duration-700 group-hover:scale-105 sm:h-64 lg:h-72" /><span className="absolute inset-0 bg-black/0 transition group-hover:bg-black/10" /></a>)}</div><p className="mt-6 text-xs text-white/50">A selection of real moments from Greatest Moments Events.</p></div></section>
+        {page === "gallery" && (<section id="gallery" className="bg-[#26251f] px-6 py-24 text-white lg:px-8"><div className="mx-auto max-w-7xl"><div className="flex flex-wrap items-end justify-between gap-6"><div><p className="text-[10px] uppercase tracking-[.3em] text-[#d1b48b]">A glimpse of the possibilities</p><h2 className="mt-4 font-serif text-4xl sm:text-5xl">Moments, beautifully made.</h2></div><a href="https://www.facebook.com/greatestmomentsevents" target="_blank" rel="noreferrer" className="border-b border-[#b18b5c] pb-2 text-[10px] uppercase tracking-[.2em] text-[#e5cda9]">Visit our Facebook ↗</a></div><div className="mt-12 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">{galleryPhotos.map((src, index) => <a href={src} target="_blank" rel="noreferrer" key={src} className={`group relative block overflow-hidden bg-[#3a382f] ${index % 3 === 1 ? "mt-8" : ""}`}><img src={src} alt={`Greatest Moments Events celebration photograph ${index + 1}`} loading={index < 4 ? "eager" : "lazy"} className="h-56 w-full object-cover transition duration-700 group-hover:scale-105 sm:h-64 lg:h-72" /><span className="absolute inset-0 bg-black/0 transition group-hover:bg-black/10" /></a>)}</div><p className="mt-6 text-xs text-white/50">A selection of real moments from Greatest Moments Events.</p></div></section>)} 
 
-        <section id="contact" className="px-6 py-24 lg:px-8"><div className="mx-auto grid max-w-7xl gap-12 md:grid-cols-2"><div><p className="text-[10px] uppercase tracking-[.3em] text-[#a17d4e]">Let's make it memorable</p><h2 className="mt-4 font-serif text-4xl sm:text-5xl">We'd love to hear<br /><em className="text-[#a17d4e]">what you're dreaming of.</em></h2><p className="mt-6 max-w-md text-sm leading-7 text-[#777168]">Tell us about your occasion and let's start planning something special.</p></div><div className="space-y-6 border-l border-[#e7e1d8] pl-0 md:pl-10"><div><p className="text-[9px] uppercase tracking-[.2em] text-[#a17d4e]">Call us</p><a href="tel:+306977955583" className="mt-2 block font-serif text-2xl">+30 697 795 5583</a></div><div><p className="text-[9px] uppercase tracking-[.2em] text-[#a17d4e]">Visit us</p><p className="mt-2 font-serif text-xl">Aristotelous 6, Agioi Anargyroi<br />135 62, Athens, Greece</p></div><div><p className="text-[9px] uppercase tracking-[.2em] text-[#a17d4e]">Follow our work</p><a href="https://www.facebook.com/greatestmomentsevents" target="_blank" rel="noreferrer" className="mt-2 inline-block font-serif text-xl underline decoration-[#b18b5c] underline-offset-4">Facebook ↗</a></div><a href="https://www.google.com/maps/search/?api=1&query=Aristotelous+6+Agioi+Anargyroi+13562+Greece" target="_blank" rel="noreferrer" className="inline-block bg-[#292720] px-7 py-4 text-[10px] uppercase tracking-[.2em] text-white hover:bg-[#a17d4e]">Get directions ↗</a></div></div></section>
+        {page === "contact" && (<section id="contact" className="px-6 py-24 lg:px-8"><div className="mx-auto grid max-w-7xl gap-12 md:grid-cols-2"><div><p className="text-[10px] uppercase tracking-[.3em] text-[#a17d4e]">Let's make it memorable</p><h2 className="mt-4 font-serif text-4xl sm:text-5xl">We'd love to hear<br /><em className="text-[#a17d4e]">what you're dreaming of.</em></h2><p className="mt-6 max-w-md text-sm leading-7 text-[#777168]">Tell us about your occasion and let's start planning something special.</p></div><div className="space-y-6 border-l border-[#e7e1d8] pl-0 md:pl-10"><div><p className="text-[9px] uppercase tracking-[.2em] text-[#a17d4e]">Call us</p><a href="tel:+306977955583" className="mt-2 block font-serif text-2xl">+30 697 795 5583</a></div><div><p className="text-[9px] uppercase tracking-[.2em] text-[#a17d4e]">Visit us</p><p className="mt-2 font-serif text-xl">Aristotelous 6, Agioi Anargyroi<br />135 62, Athens, Greece</p></div><div><p className="text-[9px] uppercase tracking-[.2em] text-[#a17d4e]">Follow our work</p><a href="https://www.facebook.com/greatestmomentsevents" target="_blank" rel="noreferrer" className="mt-2 inline-block font-serif text-xl underline decoration-[#b18b5c] underline-offset-4">Facebook ↗</a></div><a href="https://www.google.com/maps/search/?api=1&query=Aristotelous+6+Agioi+Anargyroi+13562+Greece" target="_blank" rel="noreferrer" className="inline-block bg-[#292720] px-7 py-4 text-[10px] uppercase tracking-[.2em] text-white hover:bg-[#a17d4e]">Get directions ↗</a></div></div></section>)} 
       </main>
 
       {editorOpen && <div className="fixed inset-0 z-[100] overflow-y-auto bg-[#171713]/75 p-4 sm:p-8" role="dialog" aria-modal="true" aria-label="Photo editor">
