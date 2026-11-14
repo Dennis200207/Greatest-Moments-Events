@@ -57,7 +57,6 @@ export function GalleryExperience({ page, language }: Props) {
   };
 
   useEffect(() => { void loadEvents(); }, []);
-  useEffect(() => { if (page === "gallery") recordGalleryView(null); }, [page]);
   useEffect(() => {
     if (!activeEvent) { returnFocusRef.current?.focus(); return; }
     const previousOverflow = document.body.style.overflow;
@@ -222,6 +221,8 @@ export function GalleryExperience({ page, language }: Props) {
       if (error) console.warn("Gallery view could not be recorded:", error.message);
     });
   };
+
+  useEffect(() => { if (page === "gallery") recordGalleryView(null); }, [page]);
 
   const togglePublished = async (event: GalleryEvent) => {
     if (!supabase || !isAdmin) return;
