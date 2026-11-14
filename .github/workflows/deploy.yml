@@ -1,8 +1,8 @@
 name: Deploy website to GitHub Pages
 
+# Publishing is intentionally manual while the site is being developed.
+# Pushes to main will no longer publish the website.
 on:
-  push:
-    branches: [main]
   workflow_dispatch:
 
 permissions:
