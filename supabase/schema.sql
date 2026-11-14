@@ -41,8 +41,12 @@ create table if not exists public.event_photos (
   storage_path text not null unique,
   public_url text not null,
   sort_order integer not null default 0,
+  is_thumbnail boolean not null default false,
   created_at timestamptz not null default now()
 );
+
+-- Safe to run on an existing project: adds the thumbnail flag to existing photo records.
+alter table public.event_photos add column if not exists is_thumbnail boolean not null default false;
 
 alter table public.admin_users enable row level security;
 alter table public.event_folders enable row level security;
