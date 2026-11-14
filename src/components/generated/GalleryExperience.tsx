@@ -16,9 +16,18 @@ export function GalleryExperience({ page, language }: Props) {
   const [loading, setLoading] = useState(true);
   const [notice, setNotice] = useState("");
   const [category, setCategory] = useState("All");
+  const [searchTerm, setSearchTerm] = useState("");
+  const [yearFilter, setYearFilter] = useState("All");
+  const [dateFrom, setDateFrom] = useState("");
+  const [dateTo, setDateTo] = useState("");
+  const [sortMode, setSortMode] = useState("newest");
   const [selectedLocations, setSelectedLocations] = useState<string[]>([]);
   const [locationsTouched, setLocationsTouched] = useState(false);
   const [activeEvent, setActiveEvent] = useState<GalleryEvent | null>(null);
+  const [activePhotoIndex, setActivePhotoIndex] = useState<number | null>(null);
+  const [zoomed, setZoomed] = useState(false);
+  const [touchStartX, setTouchStartX] = useState<number | null>(null);
+  const [draggedPhotoId, setDraggedPhotoId] = useState<string | null>(null);
   const [session, setSession] = useState<any>(null);
   const [isAdmin, setIsAdmin] = useState(false);
   const [email, setEmail] = useState("");
@@ -30,16 +39,27 @@ export function GalleryExperience({ page, language }: Props) {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
 
+  const sortEventPhotos = (items: GalleryEvent[]) => items.map(event => ({ ...event, event_photos: [...(event.event_photos || [])].sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0)) }));
+
   const loadEvents = async () => {
     if (!supabase) { setLoading(false); return; }
     setLoading(true);
     const { data, error } = await supabase.from("event_folders").select("*, event_photos(*)").eq("published", true).order("event_date", { ascending: false });
     if (error) setNotice(error.message);
-    else setEvents((data || []) as GalleryEvent[]);
+    else setEvents(sortEventPhotos((data || []) as GalleryEvent[]));
     setLoading(false);
   };
 
   useEffect(() => { void loadEvents(); }, []);
+  useEffect(() => {
+    if (activePhotoIndex === null) return;
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") { setActivePhotoIndex(null); setZoomed(false); }
+      if (event.key === "ArrowLeft") setActivePhotoIndex(index => Math.max(0, (index ?? 0) - 1));
+      if (event.key === "ArrowRight") setActivePhotoIndex(index => Math.min((activeEvent?.event_photos.length || 1) - 1, (index ?? 0) + 1));
+    };
+    window.addEventListener("keydown", handleKeyDown); return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [activePhotoIndex, activeEvent]);
   useEffect(() => {
     if (!supabase) return;
     let alive = true;
@@ -58,18 +78,45 @@ export function GalleryExperience({ page, language }: Props) {
   useEffect(() => {
     if (page === "admin" && isAdmin && supabase) {
       supabase.from("event_folders").select("*, event_photos(*)").order("created_at", { ascending: false }).then(({ data, error }) => {
-        if (error) setNotice(error.message); else setEvents((data || []) as GalleryEvent[]);
+        if (error) setNotice(error.message); else setEvents(sortEventPhotos((data || []) as GalleryEvent[]));
       });
     }
   }, [page, isAdmin]);
 
   const locations = useMemo(() => Array.from(new Set(events.map(e => e.location).filter(Boolean))).sort((a, b) => a.localeCompare(b)), [events]);
-  const visibleEvents = useMemo(() => events.filter(e => (category === "All" || e.category === category) && (!locationsTouched || selectedLocations.includes(e.location))), [events, category, locationsTouched, selectedLocations]);
+  const years = useMemo(() => Array.from(new Set(events.map(e => e.event_date?.slice(0, 4)).filter((year): year is string => !!year))).sort((a, b) => b.localeCompare(a)), [events]);
+  const visibleEvents = useMemo(() => {
+    const term = searchTerm.trim().toLocaleLowerCase();
+    const filtered = events.filter(e => (category === "All" || e.category === category) && (!locationsTouched || selectedLocations.includes(e.location)) && (yearFilter === "All" || e.event_date?.slice(0, 4) === yearFilter) && (!dateFrom || (!!e.event_date && e.event_date >= dateFrom)) && (!dateTo || (!!e.event_date && e.event_date <= dateTo)) && (!term || `${e.title} ${e.description || ""} ${e.location} ${e.category}`.toLocaleLowerCase().includes(term)));
+    return filtered.sort((a,b) => sortMode === "oldest" ? (a.event_date || "").localeCompare(b.event_date || "") : sortMode === "alphabetical" ? a.title.localeCompare(b.title) : (b.event_date || "").localeCompare(a.event_date || ""));
+  }, [events, category, locationsTouched, selectedLocations, searchTerm, yearFilter, dateFrom, dateTo, sortMode]);
   const toggleLocation = (location: string) => {
     setLocationsTouched(true);
-    setSelectedLocations(current => current.includes(location) ? current.filter(x => x !== location) : [...current, location]);
+    setSelectedLocations(current => { const base = locationsTouched ? current : locations; return base.includes(location) ? base.filter(x => x !== location) : [...base, location]; });
   };
-  const resetFilters = () => { setCategory("All"); setLocationsTouched(false); setSelectedLocations([]); };
+  const resetFilters = () => { setCategory("All"); setLocationsTouched(false); setSelectedLocations([]); setSearchTerm(""); setYearFilter("All"); setDateFrom(""); setDateTo(""); setSortMode("newest"); };
+
+  const reorderPhotos = async (eventId: string, draggedId: string, targetId: string) => {
+    if (!supabase || draggedId === targetId) return;
+    const original = events.find(item => item.id === eventId);
+    if (!original) return;
+    const ordered = [...original.event_photos].sort((a,b) => (a.sort_order ?? 0) - (b.sort_order ?? 0));
+    const from = ordered.findIndex(photo => photo.id === draggedId), to = ordered.findIndex(photo => photo.id === targetId);
+    if (from < 0 || to < 0) return;
+    const [moved] = ordered.splice(from, 1); ordered.splice(to, 0, moved);
+    const updated = ordered.map((photo,index) => ({...photo, sort_order:index}));
+    setEvents(current => current.map(item => item.id === eventId ? {...item,event_photos:updated} : item));
+    setActiveEvent(current => current?.id === eventId ? {...current,event_photos:updated} : current);
+    try {
+      const results = await Promise.all(updated.map(photo => supabase!.from("event_photos").update({sort_order:photo.sort_order}).eq("id",photo.id).eq("event_id",eventId)));
+      const failed = results.find(result => result.error); if (failed?.error) throw failed.error;
+      setNotice(language === "el" ? "Η σειρά φωτογραφιών αποθηκεύτηκε." : "Photo order saved.");
+    } catch (error:any) {
+      setEvents(current => current.map(item => item.id === eventId ? original : item));
+      setActiveEvent(current => current?.id === eventId ? original : current);
+      setNotice(error?.message || t.failed);
+    }
+  };
 
   const signIn = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -114,13 +161,14 @@ export function GalleryExperience({ page, language }: Props) {
             const { error: clearThumbError } = await supabase.from("event_photos").update({ is_thumbnail: false }).eq("event_id", eventId);
             if (clearThumbError) throw clearThumbError;
           }
-          const { error: rowError } = await supabase.from("event_photos").insert({ event_id: eventId, storage_path: path, public_url: publicData.publicUrl, sort_order: 0, is_thumbnail: makeThumbnail });
+          const existingPhotoCount = editingId ? (events.find(event => event.id === eventId)?.event_photos.length || 0) : 0;
+          const { error: rowError } = await supabase.from("event_photos").insert({ event_id: eventId, storage_path: path, public_url: publicData.publicUrl, sort_order: existingPhotoCount + Array.from(files).indexOf(file), is_thumbnail: makeThumbnail });
           if (rowError) throw rowError;
         }
       }
       setNotice(t.saved); resetForm();
       const { data } = await supabase.from("event_folders").select("*, event_photos(*)").order("created_at", { ascending: false });
-      setEvents((data || []) as GalleryEvent[]);
+      setEvents(sortEventPhotos((data || []) as GalleryEvent[]));
     } catch (error: any) { setNotice(error?.message || t.failed); }
     finally { setSaving(false); }
   };
@@ -157,6 +205,7 @@ export function GalleryExperience({ page, language }: Props) {
         <label className="text-xs sm:col-span-2">{t.description}<textarea rows={3} value={form.description} onChange={e => setForm({ ...form, description: e.target.value })} className="mt-2 w-full border border-[#e5ded3] px-4 py-3 text-sm" /></label>
         <label className="text-xs sm:col-span-2">{t.photos}<input type="file" accept="image/*" multiple onChange={e => { setFiles(e.target.files); setSelectedThumbnailFileIndex(e.target.files?.length ? (editingId ? null : 0) : null); }} className="mt-2 block w-full border border-dashed border-[#b18b5c] p-4 text-sm" /></label>
         {editingId && events.find(event => event.id === editingId)?.event_photos?.length ? <div className="sm:col-span-2"><p className="mb-3 text-xs font-medium">Choose the folder thumbnail from existing photos</p><div className="flex flex-wrap gap-3">{events.find(event => event.id === editingId)!.event_photos.map(photo => <label key={photo.id} className={"cursor-pointer border p-2 " + (selectedThumbnailFileIndex === null && selectedThumbnailId === photo.id ? "border-[#a17d4e] bg-[#f5f1ea]" : "border-[#e5ded3]")}><img src={photo.public_url} alt="" className="h-24 w-32 object-cover" /><span className="mt-2 flex items-center gap-2 text-xs"><input type="radio" name="existing-thumbnail" checked={selectedThumbnailFileIndex === null && selectedThumbnailId === photo.id} onChange={() => { setSelectedThumbnailId(photo.id); setSelectedThumbnailFileIndex(null); }} />Use as thumbnail</span></label>)}</div></div> : null}
+        {editingId && events.find(event => event.id === editingId)?.event_photos?.length ? <div className="sm:col-span-2"><div className="mb-3 flex flex-wrap items-end justify-between gap-2"><div><h3 className="text-sm font-medium">Arrange event photos</h3><p className="mt-1 text-xs text-[#777168]">Drag photos to reorder them. Use the arrows for keyboard-friendly movement.</p></div></div><div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4">{[...events.find(event => event.id === editingId)!.event_photos].sort((a,b)=>(a.sort_order??0)-(b.sort_order??0)).map((photo,index,ordered)=><div key={photo.id} draggable onDragStart={()=>setDraggedPhotoId(photo.id)} onDragOver={e=>e.preventDefault()} onDrop={e=>{e.preventDefault();if(draggedPhotoId)void reorderPhotos(editingId,draggedPhotoId,photo.id);setDraggedPhotoId(null);}} onDragEnd={()=>setDraggedPhotoId(null)} className={`border bg-white p-2 ${draggedPhotoId===photo.id?"opacity-40":""}`}><img src={photo.public_url} alt="" className="h-28 w-full object-cover" /><p className="mt-2 truncate text-[10px] text-[#777168]">{index+1}. {photo.is_thumbnail?"Folder thumbnail":"Photo"}</p><div className="mt-2 flex justify-between gap-2"><button type="button" disabled={index===0} onClick={()=>void reorderPhotos(editingId,photo.id,ordered[index-1].id)} aria-label={`Move photo ${index+1} earlier`} className="border px-3 py-1 text-xs disabled:opacity-30">↑</button><button type="button" disabled={index===ordered.length-1} onClick={()=>void reorderPhotos(editingId,photo.id,ordered[index+1].id)} aria-label={`Move photo ${index+1} later`} className="border px-3 py-1 text-xs disabled:opacity-30">↓</button></div></div>)}</div></div> : null}
         {files?.length ? <div className="sm:col-span-2"><p className="mb-3 text-xs font-medium">Choose a newly uploaded photo as the folder thumbnail</p><div className="flex flex-wrap gap-3">{Array.from(files).map((file, index) => <label key={index} className={"cursor-pointer border p-2 " + (selectedThumbnailFileIndex === index ? "border-[#a17d4e] bg-[#f5f1ea]" : "border-[#e5ded3]")}><span className="block max-w-40 truncate text-xs">{file.name}</span><span className="mt-2 flex items-center gap-2 text-xs"><input type="radio" name="new-thumbnail" checked={selectedThumbnailFileIndex === index} onChange={() => setSelectedThumbnailFileIndex(index)} />Use as thumbnail</span></label>)}</div></div> : null}
         <label className="flex items-center gap-3 text-xs sm:col-span-2"><input type="checkbox" checked={form.published} onChange={e => setForm({ ...form, published: e.target.checked })} />{t.published}</label>
         <div className="flex flex-wrap gap-3 sm:col-span-2"><button disabled={saving} className="bg-[#292720] px-7 py-3 text-xs uppercase tracking-widest text-white disabled:opacity-50">{saving ? "…" : editingId ? t.update : t.save}</button>{editingId && <button type="button" onClick={resetForm} className="border border-[#d9d1c5] px-5 py-3 text-xs">{t.cancel}</button>}</div>
@@ -169,10 +218,22 @@ export function GalleryExperience({ page, language }: Props) {
   return <section className="min-h-[65vh] bg-[#26251f] px-5 py-20 text-white sm:px-8">
     <div className="mx-auto max-w-7xl">
       <div className="flex flex-wrap items-end justify-between gap-6"><div><p className="text-[10px] uppercase tracking-[.3em] text-[#d1b48b]">A glimpse of the possibilities</p><h1 className="mt-4 font-serif text-4xl sm:text-5xl">{t.gallery}</h1><p className="mt-4 max-w-xl text-sm text-white/65">{t.subtitle}</p></div><a href="https://www.facebook.com/greatestmomentsevents" target="_blank" rel="noreferrer" className="border-b border-[#b18b5c] pb-2 text-[10px] uppercase tracking-[.2em] text-[#e5cda9]">Visit our Facebook ↗</a></div>
-      <div className="mt-10 flex flex-wrap gap-2"><button onClick={() => setCategory("All")} className={"border px-4 py-2 text-xs " + (category === "All" ? "border-[#c6a477] bg-[#a17d4e] text-white" : "border-white/20 text-white/70")}>{t.all}</button>{categories.map(c => <button key={c} onClick={() => setCategory(c)} className={"border px-4 py-2 text-xs " + (category === c ? "border-[#c6a477] bg-[#a17d4e] text-white" : "border-white/20 text-white/70")}>{c}</button>)}</div>
+      <div className="mt-10 grid gap-3 rounded-sm border border-white/15 bg-white/[.04] p-4 sm:grid-cols-2 lg:grid-cols-5">
+        <label className="text-xs text-white/75 lg:col-span-2">Search events<input type="search" value={searchTerm} onChange={e => setSearchTerm(e.target.value)} placeholder="Name, description, location…" className="mt-2 w-full border border-white/20 bg-[#333128] px-3 py-2 text-sm text-white placeholder:text-white/35" /></label>
+        <label className="text-xs text-white/75">Year<select value={yearFilter} onChange={e => setYearFilter(e.target.value)} className="mt-2 w-full border border-white/20 bg-[#333128] px-3 py-2 text-sm text-white"><option value="All">All years</option>{years.map(year => <option key={year} value={year}>{year}</option>)}</select></label>
+        <label className="text-xs text-white/75">From<input type="date" value={dateFrom} max={dateTo || undefined} onChange={e => setDateFrom(e.target.value)} className="mt-2 w-full border border-white/20 bg-[#333128] px-3 py-2 text-sm text-white" /></label>
+        <label className="text-xs text-white/75">To<input type="date" value={dateTo} min={dateFrom || undefined} onChange={e => setDateTo(e.target.value)} className="mt-2 w-full border border-white/20 bg-[#333128] px-3 py-2 text-sm text-white" /></label>
+        <label className="text-xs text-white/75 sm:col-span-2 lg:col-span-1">Sort by<select value={sortMode} onChange={e => setSortMode(e.target.value)} className="mt-2 w-full border border-white/20 bg-[#333128] px-3 py-2 text-sm text-white"><option value="newest">Newest first</option><option value="oldest">Oldest first</option><option value="alphabetical">Name A–Z</option></select></label>
+        <p className="self-end text-xs text-white/55 sm:col-span-2 lg:col-span-4">{visibleEvents.length} {visibleEvents.length === 1 ? "event" : "events"} found</p><button onClick={resetFilters} className="border border-white/25 px-3 py-2 text-xs text-white/75 hover:bg-white/10">Clear all filters</button>
+      </div>
+      <div className="mt-6 flex flex-wrap gap-2"><button onClick={() => setCategory("All")} className={"border px-4 py-2 text-xs " + (category === "All" ? "border-[#c6a477] bg-[#a17d4e] text-white" : "border-white/20 text-white/70")}>{t.all}</button>{categories.map(c => <button key={c} onClick={() => setCategory(c)} className={"border px-4 py-2 text-xs " + (category === c ? "border-[#c6a477] bg-[#a17d4e] text-white" : "border-white/20 text-white/70")}>{c}</button>)}</div>
       {locations.length > 0 && <div className="mt-8 border-y border-white/15 py-5"><div className="mb-3 flex flex-wrap items-center justify-between gap-3"><h2 className="text-xs uppercase tracking-[.2em] text-[#e5cda9]">{t.locations}</h2><button onClick={resetFilters} className="text-xs text-white/60 underline">{t.clear}</button></div><div className="flex flex-wrap gap-3">{locations.map(location => <label key={location} className="flex cursor-pointer items-center gap-2 text-xs text-white/80"><input type="checkbox" checked={!locationsTouched || selectedLocations.includes(location)} onChange={() => toggleLocation(location)} className="accent-[#b18b5c]" />{location}</label>)}</div></div>}
       {loading ? <p className="py-16 text-sm text-white/60">{t.loading}</p> : visibleEvents.length === 0 ? <p className="py-16 text-sm text-white/60">{t.empty}</p> : <div className="mt-10 grid gap-5 sm:grid-cols-2 lg:grid-cols-3">{visibleEvents.map(event => <button key={event.id} onClick={() => setActiveEvent(event)} className="group overflow-hidden bg-[#333128] text-left"><div className="overflow-hidden"><img src={(event.event_photos?.find(photo => photo.is_thumbnail) || event.event_photos?.[0])?.public_url || ""} alt={event.title} className="h-64 w-full object-cover transition duration-700 group-hover:scale-105" loading="lazy" /></div><div className="p-5"><p className="text-[9px] uppercase tracking-[.2em] text-[#d1b48b]">{event.category}</p><h2 className="mt-2 font-serif text-2xl">{event.title}</h2><p className="mt-2 text-xs text-white/65">{event.location}{event.event_date ? " · " + new Date(event.event_date + "T00:00:00").toLocaleDateString(language === "el" ? "el-GR" : "en-GB") : ""}</p><p className="mt-3 text-[10px] text-white/45">{event.event_photos?.length || 0} {t.photoCount} · {t.open} ↗</p></div></button>)}</div>}
     </div>
-    {activeEvent && <div className="fixed inset-0 z-[100] overflow-y-auto bg-black/90 p-5 sm:p-10" role="dialog" aria-modal="true"><div className="mx-auto max-w-6xl"><button onClick={() => setActiveEvent(null)} className="mb-6 border border-white/30 px-4 py-2 text-xs text-white">× {t.back}</button><p className="text-[10px] uppercase tracking-[.2em] text-[#d1b48b]">{activeEvent.category} · {activeEvent.location}</p><h2 className="mt-2 font-serif text-4xl text-white">{activeEvent.title}</h2>{activeEvent.description && <p className="mt-3 max-w-2xl text-sm text-white/70">{activeEvent.description}</p>}<div className="mt-8 grid grid-cols-2 gap-3 md:grid-cols-3">{activeEvent.event_photos?.map(photo => <a key={photo.id} href={photo.public_url} target="_blank" rel="noreferrer"><img src={photo.public_url} alt={activeEvent.title} className="h-56 w-full object-cover sm:h-72" loading="lazy" /></a>)}</div></div></div>}
+    {activeEvent && <div className="fixed inset-0 z-[100] overflow-y-auto bg-black/90 p-5 sm:p-10" role="dialog" aria-modal="true" aria-label={activeEvent.title}><div className="mx-auto max-w-6xl"><button onClick={() => { setActiveEvent(null); setActivePhotoIndex(null); setZoomed(false); }} className="mb-6 border border-white/30 px-4 py-2 text-xs text-white">× {t.back}</button><p className="text-[10px] uppercase tracking-[.2em] text-[#d1b48b]">{activeEvent.category} · {activeEvent.location}</p><h2 className="mt-2 font-serif text-4xl text-white">{activeEvent.title}</h2>{activeEvent.description && <p className="mt-3 max-w-2xl text-sm text-white/70">{activeEvent.description}</p>}<div className="mt-8 grid grid-cols-2 gap-3 md:grid-cols-3">{[...(activeEvent.event_photos || [])].sort((a,b)=>(a.sort_order??0)-(b.sort_order??0)).map((photo,index)=><button type="button" key={photo.id} onClick={()=>{setActivePhotoIndex(index);setZoomed(false);}} aria-label={`Open photo ${index+1}`} className="group overflow-hidden text-left"><img src={photo.public_url} alt={`${activeEvent.title} ${index+1}`} className="h-56 w-full object-cover transition duration-500 group-hover:scale-105 sm:h-72" loading="lazy" /></button>)}</div></div></div>}
+    {activeEvent && activePhotoIndex !== null && activeEvent.event_photos?.[activePhotoIndex] && <div className="fixed inset-0 z-[120] flex flex-col bg-black text-white" role="dialog" aria-modal="true" aria-label="Full-screen photo viewer" onTouchStart={e=>setTouchStartX(e.touches[0]?.clientX??null)} onTouchEnd={e=>{if(touchStartX!==null){const delta=e.changedTouches[0].clientX-touchStartX;if(Math.abs(delta)>50)setActivePhotoIndex(index=>Math.max(0,Math.min((activeEvent.event_photos?.length||1)-1,(index??0)+(delta<0?1:-1))));}setTouchStartX(null);}}>
+      <div className="flex items-center justify-between gap-3 px-4 py-3 sm:px-6"><p className="text-xs text-white/70">{activeEvent.title} · {activePhotoIndex+1} / {activeEvent.event_photos.length}</p><div className="flex items-center gap-2"><button onClick={()=>setZoomed(value=>!value)} className="border border-white/30 px-3 py-2 text-xs">{zoomed?"Fit":"Zoom"}</button><button onClick={()=>{setActivePhotoIndex(null);setZoomed(false);}} aria-label="Close full-screen viewer" className="border border-white/30 px-3 py-2 text-lg leading-none">×</button></div></div>
+      <div className="relative flex min-h-0 flex-1 items-center justify-center overflow-hidden px-12 pb-4"><button disabled={activePhotoIndex===0} onClick={()=>{setActivePhotoIndex(index=>Math.max(0,(index??0)-1));setZoomed(false);}} aria-label="Previous photo" className="absolute left-2 z-10 border border-white/30 px-3 py-3 text-xl disabled:opacity-25">‹</button><img src={activeEvent.event_photos[activePhotoIndex].public_url} alt={`${activeEvent.title} ${activePhotoIndex+1}`} className={`max-h-full max-w-full object-contain transition-transform duration-200 ${zoomed?"scale-150 cursor-zoom-out":"cursor-zoom-in"}`} onClick={()=>setZoomed(value=>!value)} /><button disabled={activePhotoIndex>=activeEvent.event_photos.length-1} onClick={()=>{setActivePhotoIndex(index=>Math.min(activeEvent.event_photos.length-1,(index??0)+1));setZoomed(false);}} aria-label="Next photo" className="absolute right-2 z-10 border border-white/30 px-3 py-3 text-xl disabled:opacity-25">›</button></div>
+    </div>}
   </section>;
 }
