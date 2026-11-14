@@ -69,7 +69,7 @@ Deno.serve(async (req) => {
         return json({ error: "Invalid image identifier" }, 400);
       }
       const timestamp = Math.floor(Date.now() / 1000).toString();
-      const params = { overwrite: "false", public_id: publicId, timestamp };
+      const params = { overwrite: "true", public_id: publicId, timestamp };
       const signature = await cloudinarySignature(params, apiSecret);
       return json({ cloudName, apiKey, timestamp, publicId, signature });
     }
