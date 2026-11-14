@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { supabase } from "../lib/supabase";
+import { supabase } from "../../lib/supabase";
 
 type EventPhoto = { id: string; event_id: string; storage_path: string; public_url: string; sort_order: number };
 type GalleryEvent = { id: string; title: string; category: string; event_date: string | null; location: string; description: string | null; published: boolean; event_photos: EventPhoto[] };
