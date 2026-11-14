@@ -47,7 +47,7 @@ const serviceGroups = [{
 const events = ["Wedding", "Christening", "Birthday party", "Private celebration", "Corporate event", "Other"];
 type SitePage = "home" | "about" | "services" | "gallery" | "contact" | "plan";
 const getPageFromHash = (): SitePage => {
-  const candidate = window.location.hash.replace(/^#\\/?/, "") as SitePage;
+  const candidate = window.location.hash.replace(/^#\/?/, "") as SitePage;
   return (["home", "about", "services", "gallery", "contact", "plan"] as SitePage[]).includes(candidate) ? candidate : "home";
 };
 
