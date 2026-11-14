@@ -42,6 +42,8 @@ export function GalleryExperience({ page, language }: Props) {
   const [saving, setSaving] = useState(false);
   const [migrationRunning, setMigrationRunning] = useState(false);
   const [migrationProgress, setMigrationProgress] = useState({ done: 0, total: 0 });
+  const [uploadProgress, setUploadProgress] = useState({ done: 0, total: 0 });
+  const [viewStats, setViewStats] = useState<Array<{ event_id: string | null; created_at: string }>>([]);
 
   const sortEventPhotos = (items: GalleryEvent[]) => items.map(event => ({ ...event, event_photos: [...(event.event_photos || [])].sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0) || (a.created_at || "").localeCompare(b.created_at || "")) }));
 
@@ -55,6 +57,7 @@ export function GalleryExperience({ page, language }: Props) {
   };
 
   useEffect(() => { void loadEvents(); }, []);
+  useEffect(() => { if (page === "gallery") recordGalleryView(null); }, [page]);
   useEffect(() => {
     if (!activeEvent) { returnFocusRef.current?.focus(); return; }
     const previousOverflow = document.body.style.overflow;
@@ -87,8 +90,14 @@ export function GalleryExperience({ page, language }: Props) {
   }, [session]);
   useEffect(() => {
     if (page === "admin" && isAdmin && supabase) {
-      supabase.from("event_folders").select("*, event_photos(*)").order("created_at", { ascending: false }).then(({ data, error }) => {
-        if (error) setNotice(error.message); else setEvents(sortEventPhotos((data || []) as GalleryEvent[]));
+      Promise.all([
+        supabase.from("event_folders").select("*, event_photos(*)").order("created_at", { ascending: false }),
+        supabase.from("gallery_views").select("event_id, created_at").order("created_at", { ascending: false })
+      ]).then(([eventResult, viewResult]) => {
+        if (eventResult.error) setNotice(eventResult.error.message);
+        else setEvents(sortEventPhotos((eventResult.data || []) as GalleryEvent[]));
+        if (viewResult.error) setNotice(viewResult.error.message);
+        else setViewStats((viewResult.data || []) as Array<{ event_id: string | null; created_at: string }>);
       });
     }
   }, [page, isAdmin]);
@@ -200,7 +209,28 @@ export function GalleryExperience({ page, language }: Props) {
     if (error) setNotice(error.message);
   };
   const signOut = async () => { if (supabase) await supabase.auth.signOut(); setIsAdmin(false); };
-  const resetForm = () => { setForm({ title: "", category: categories[0], event_date: "", location: "", description: "", published: true }); setFiles(null); setEditingId(null); setSelectedThumbnailId(""); setSelectedThumbnailFileIndex(null); };
+  const resetForm = () => { setForm({ title: "", category: categories[0], event_date: "", location: "", description: "", published: true }); setFiles(null); setEditingId(null); setSelectedThumbnailId(""); setSelectedThumbnailFileIndex(null); setUploadProgress({ done: 0, total: 0 }); };
+
+  const recordGalleryView = (eventId: string | null = null) => {
+    if (!supabase) return;
+    const key = eventId ? "gm-event-view-" + eventId : "gm-gallery-view";
+    try {
+      if (sessionStorage.getItem(key)) return;
+      sessionStorage.setItem(key, "1");
+    } catch { /* Continue without session-based de-duplication. */ }
+    void supabase.from("gallery_views").insert({ event_id: eventId }).then(({ error }) => {
+      if (error) console.warn("Gallery view could not be recorded:", error.message);
+    });
+  };
+
+  const togglePublished = async (event: GalleryEvent) => {
+    if (!supabase || !isAdmin) return;
+    const nextPublished = !event.published;
+    const { error } = await supabase.from("event_folders").update({ published: nextPublished }).eq("id", event.id);
+    if (error) { setNotice(error.message); return; }
+    setEvents(current => current.map(item => item.id === event.id ? { ...item, published: nextPublished } : item));
+    setNotice(nextPublished ? "Event published." : "Event moved to drafts.");
+  };
 
   const saveEvent = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -224,19 +254,21 @@ export function GalleryExperience({ page, language }: Props) {
         if (thumbError) throw thumbError;
       }
       if (eventId && files?.length) {
-        for (const file of Array.from(files)) {
-          if (!file.type.startsWith("image/")) continue;
+        const selectedFiles = Array.from(files).filter(file => file.type.startsWith("image/"));
+        setUploadProgress({ done: 0, total: selectedFiles.length });
+        const existingPhotoCount = editingId ? Math.max(-1, ...(events.find(event => event.id === eventId)?.event_photos || []).map(photo => photo.sort_order ?? -1)) + 1 : 0;
+        for (const [fileIndex, file] of selectedFiles.entries()) {
           const photoId = crypto.randomUUID();
           const uploaded = await uploadToCloudinary(file, eventId, photoId);
           const path = "cloudinary:" + uploaded.public_id;
-          const makeThumbnail = selectedThumbnailFileIndex === Array.from(files).indexOf(file) || (!editingId && selectedThumbnailFileIndex === null && Array.from(files).indexOf(file) === 0);
+          const makeThumbnail = selectedThumbnailFileIndex === fileIndex || (!editingId && selectedThumbnailFileIndex === null && fileIndex === 0);
           if (makeThumbnail) {
             const { error: clearThumbError } = await supabase.from("event_photos").update({ is_thumbnail: false }).eq("event_id", eventId);
             if (clearThumbError) throw clearThumbError;
           }
-          const existingPhotoCount = editingId ? Math.max(-1, ...(events.find(event => event.id === eventId)?.event_photos || []).map(photo => photo.sort_order ?? -1)) + 1 : 0;
-          const { error: rowError } = await supabase.from("event_photos").insert({ id: photoId, event_id: eventId, storage_path: path, cloudinary_public_id: uploaded.public_id, public_url: uploaded.secure_url, sort_order: existingPhotoCount + Array.from(files).indexOf(file), is_thumbnail: makeThumbnail });
+          const { error: rowError } = await supabase.from("event_photos").insert({ id: photoId, event_id: eventId, storage_path: path, cloudinary_public_id: uploaded.public_id, public_url: uploaded.secure_url, sort_order: existingPhotoCount + fileIndex, is_thumbnail: makeThumbnail });
           if (rowError) throw rowError;
+          setUploadProgress({ done: fileIndex + 1, total: selectedFiles.length });
         }
       }
       setNotice(t.saved); resetForm();
@@ -277,21 +309,30 @@ export function GalleryExperience({ page, language }: Props) {
       <div className="flex flex-wrap items-center justify-between gap-4"><div><p className="text-[10px] uppercase tracking-[.3em] text-[#a17d4e]">Greatest Moments Events</p><h1 className="mt-2 font-serif text-4xl">{t.admin}</h1></div>{session && <button onClick={signOut} className="border border-[#b18b5c] px-5 py-3 text-xs">{t.signOut}</button>}</div>
       {!session && <form onSubmit={signIn} className="mt-10 max-w-md space-y-4 bg-white p-7 shadow-sm"><h2 className="font-serif text-2xl">{t.login}</h2><label className="block text-xs">{t.email}<input type="email" required value={email} onChange={e => setEmail(e.target.value)} className="mt-2 w-full border border-[#e5ded3] px-4 py-3 text-sm" /></label><label className="block text-xs">{t.password}<input type="password" required value={password} onChange={e => setPassword(e.target.value)} className="mt-2 w-full border border-[#e5ded3] px-4 py-3 text-sm" /></label><button className="bg-[#292720] px-7 py-3 text-xs uppercase tracking-widest text-white">{t.signIn}</button></form>}
       {session && !isAdmin && <p className="mt-8 max-w-2xl border border-amber-300 bg-amber-50 p-5 text-sm text-amber-900">{t.adminOnly}</p>}
-      {session && isAdmin && <><div className="mt-8 border border-[#e5ded3] bg-white p-6 shadow-sm"><div className="flex flex-wrap items-center justify-between gap-4"><div><h2 className="font-serif text-xl">Cloudinary photo migration</h2><p className="mt-1 text-xs text-[#777168]">Move existing Supabase photos to Cloudinary. Original files remain in Supabase until you verify the migration.</p></div><button type="button" onClick={() => void migrateExistingPhotos()} disabled={migrationRunning} className="bg-[#292720] px-5 py-3 text-xs uppercase tracking-widest text-white disabled:opacity-50">{migrationRunning ? "Migrating…" : "Migrate existing photos"}</button></div>{migrationRunning && <div className="mt-4"><div className="h-2 overflow-hidden bg-[#eee8df]"><div className="h-full bg-[#a17d4e] transition-all" style={{ width: migrationProgress.total ? (Math.round((migrationProgress.done / migrationProgress.total) * 100) + "%") : "0%" }} /></div><p className="mt-2 text-xs text-[#777168]">{migrationProgress.done} / {migrationProgress.total} photos processed</p></div>}</div><form onSubmit={saveEvent} className="mt-10 grid gap-5 bg-white p-6 shadow-sm sm:grid-cols-2 sm:p-8">
+      {session && isAdmin && <><section className="mt-8 grid gap-3 sm:grid-cols-2 lg:grid-cols-4" aria-label="Gallery statistics">
+        {[
+          { label: "Total events", value: events.length },
+          { label: "Published", value: events.filter(event => event.published).length },
+          { label: "Drafts", value: events.filter(event => !event.published).length },
+          { label: "Photos", value: events.reduce((sum, event) => sum + (event.event_photos?.length || 0), 0) }
+        ].map(stat => <div key={stat.label} className="border border-[#e5ded3] bg-white p-5 shadow-sm"><p className="text-[10px] uppercase tracking-[.18em] text-[#777168]">{stat.label}</p><p className="mt-2 font-serif text-3xl">{stat.value}</p></div>)}
+        <div className="border border-[#e5ded3] bg-white p-5 shadow-sm sm:col-span-2 lg:col-span-4"><div className="flex flex-wrap items-end justify-between gap-3"><div><p className="text-[10px] uppercase tracking-[.18em] text-[#777168]">Visitor views</p><p className="mt-2 font-serif text-3xl">{viewStats.length}</p></div><p className="text-xs text-[#777168]">Gallery visits: {viewStats.filter(view => view.event_id === null).length} · Event opens: {viewStats.filter(view => view.event_id !== null).length}</p></div><div className="mt-4 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">{events.map(event => <div key={event.id} className="flex justify-between gap-3 border-t border-[#eee8df] pt-2 text-xs"><span className="truncate">{event.title}</span><span className="shrink-0 tabular-nums">{viewStats.filter(view => view.event_id === event.id).length} views</span></div>)}</div></div>
+      </section><div className="mt-8 border border-[#e5ded3] bg-white p-6 shadow-sm"><div className="flex flex-wrap items-center justify-between gap-4"><div><h2 className="font-serif text-xl">Cloudinary photo migration</h2><p className="mt-1 text-xs text-[#777168]">Move existing Supabase photos to Cloudinary. Original files remain in Supabase until you verify the migration.</p></div><button type="button" onClick={() => void migrateExistingPhotos()} disabled={migrationRunning} className="bg-[#292720] px-5 py-3 text-xs uppercase tracking-widest text-white disabled:opacity-50">{migrationRunning ? "Migrating…" : "Migrate existing photos"}</button></div>{migrationRunning && <div className="mt-4"><div className="h-2 overflow-hidden bg-[#eee8df]"><div className="h-full bg-[#a17d4e] transition-all" style={{ width: migrationProgress.total ? (Math.round((migrationProgress.done / migrationProgress.total) * 100) + "%") : "0%" }} /></div><p className="mt-2 text-xs text-[#777168]">{migrationProgress.done} / {migrationProgress.total} photos processed</p></div>}</div><form onSubmit={saveEvent} className="mt-10 grid gap-5 bg-white p-6 shadow-sm sm:grid-cols-2 sm:p-8">
         <h2 className="font-serif text-2xl sm:col-span-2">{editingId ? t.update : t.save}</h2>
         <label className="text-xs">{t.title}<input required value={form.title} onChange={e => setForm({ ...form, title: e.target.value })} className="mt-2 w-full border border-[#e5ded3] px-4 py-3 text-sm" /></label>
         <label className="text-xs">{t.category}<select value={form.category} onChange={e => setForm({ ...form, category: e.target.value })} className="mt-2 w-full border border-[#e5ded3] bg-white px-4 py-3 text-sm">{categories.map(c => <option key={c}>{c}</option>)}</select></label>
         <label className="text-xs">{t.date}<input type="date" value={form.event_date} onChange={e => setForm({ ...form, event_date: e.target.value })} className="mt-2 w-full border border-[#e5ded3] px-4 py-3 text-sm" /></label>
         <label className="text-xs">{t.location}<input required value={form.location} onChange={e => setForm({ ...form, location: e.target.value })} placeholder="e.g. Athens, Greece" className="mt-2 w-full border border-[#e5ded3] px-4 py-3 text-sm" /></label>
         <label className="text-xs sm:col-span-2">{t.description}<textarea rows={3} value={form.description} onChange={e => setForm({ ...form, description: e.target.value })} className="mt-2 w-full border border-[#e5ded3] px-4 py-3 text-sm" /></label>
-        <label className="text-xs sm:col-span-2">{t.photos}<input type="file" accept="image/*" multiple onChange={e => { setFiles(e.target.files); setSelectedThumbnailFileIndex(e.target.files?.length ? (editingId ? null : 0) : null); }} className="mt-2 block w-full border border-dashed border-[#b18b5c] p-4 text-sm" /></label>
+        <label className="text-xs sm:col-span-2">{t.photos}<input type="file" accept="image/*" multiple onChange={e => { setFiles(e.target.files); setSelectedThumbnailFileIndex(e.target.files?.length ? (editingId ? null : 0) : null); setUploadProgress({ done: 0, total: e.target.files?.length || 0 }); }} className="mt-2 block w-full border border-dashed border-[#b18b5c] p-4 text-sm" /><span className="mt-2 block text-[11px] text-[#777168]">Select multiple photos to upload them together. Uploads are processed safely one at a time.</span></label>
+        {uploadProgress.total > 0 && <div className="sm:col-span-2"><div className="flex justify-between text-xs text-[#777168]"><span>Bulk upload progress</span><span>{uploadProgress.done} / {uploadProgress.total}</span></div><div className="mt-2 h-2 overflow-hidden bg-[#eee8df]"><div className="h-full bg-[#a17d4e] transition-all" style={{ width: Math.round(uploadProgress.done / uploadProgress.total * 100) + "%" }} /></div></div>}
         {editingId && events.find(event => event.id === editingId)?.event_photos?.length ? <div className="sm:col-span-2"><p className="mb-3 text-xs font-medium">Choose the folder thumbnail from existing photos</p><div className="flex flex-wrap gap-3">{events.find(event => event.id === editingId)!.event_photos.map(photo => <label key={photo.id} className={"cursor-pointer border p-2 " + (selectedThumbnailFileIndex === null && selectedThumbnailId === photo.id ? "border-[#a17d4e] bg-[#f5f1ea]" : "border-[#e5ded3]")}><img src={photo.public_url} alt="" className="h-24 w-32 object-cover" /><span className="mt-2 flex items-center gap-2 text-xs"><input type="radio" name="existing-thumbnail" checked={selectedThumbnailFileIndex === null && selectedThumbnailId === photo.id} onChange={() => { setSelectedThumbnailId(photo.id); setSelectedThumbnailFileIndex(null); }} />Use as thumbnail</span></label>)}</div></div> : null}
         {editingId && events.find(event => event.id === editingId)?.event_photos?.length ? <div className="sm:col-span-2"><div className="mb-3 flex flex-wrap items-end justify-between gap-2"><div><h3 className="text-sm font-medium">{t.arrangePhotos}</h3><p className="mt-1 text-xs text-[#777168]">{t.dragHelp}</p></div></div><div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4">{[...events.find(event => event.id === editingId)!.event_photos].sort((a,b)=>(a.sort_order??0)-(b.sort_order??0)).map((photo,index,ordered)=><div key={photo.id} draggable onDragStart={()=>setDraggedPhotoId(photo.id)} onDragOver={e=>e.preventDefault()} onDrop={e=>{e.preventDefault();if(draggedPhotoId)void reorderPhotos(editingId,draggedPhotoId,photo.id);setDraggedPhotoId(null);}} onDragEnd={()=>setDraggedPhotoId(null)} className={`border bg-white p-2 ${draggedPhotoId===photo.id?"opacity-40":""}`}><img src={photo.public_url} alt="" className="h-28 w-full object-cover" /><p className="mt-2 truncate text-[10px] text-[#777168]">{index+1}. {photo.is_thumbnail?"Folder thumbnail":"Photo"}</p><div className="mt-2 flex justify-between gap-2"><button type="button" disabled={index===0} onClick={()=>void reorderPhotos(editingId,photo.id,ordered[index-1].id)} aria-label={`Move photo ${index+1} earlier`} className="border px-3 py-1 text-xs disabled:opacity-30">↑</button><button type="button" disabled={index===ordered.length-1} onClick={()=>void reorderPhotos(editingId,photo.id,ordered[index+1].id)} aria-label={`Move photo ${index+1} later`} className="border px-3 py-1 text-xs disabled:opacity-30">↓</button></div></div>)}</div></div> : null}
         {files?.length ? <div className="sm:col-span-2"><p className="mb-3 text-xs font-medium">Choose a newly uploaded photo as the folder thumbnail</p><div className="flex flex-wrap gap-3">{Array.from(files).map((file, index) => <label key={index} className={"cursor-pointer border p-2 " + (selectedThumbnailFileIndex === index ? "border-[#a17d4e] bg-[#f5f1ea]" : "border-[#e5ded3]")}><span className="block max-w-40 truncate text-xs">{file.name}</span><span className="mt-2 flex items-center gap-2 text-xs"><input type="radio" name="new-thumbnail" checked={selectedThumbnailFileIndex === index} onChange={() => setSelectedThumbnailFileIndex(index)} />Use as thumbnail</span></label>)}</div></div> : null}
         <label className="flex items-center gap-3 text-xs sm:col-span-2"><input type="checkbox" checked={form.published} onChange={e => setForm({ ...form, published: e.target.checked })} />{t.published}</label>
         <div className="flex flex-wrap gap-3 sm:col-span-2"><button disabled={saving} className="bg-[#292720] px-7 py-3 text-xs uppercase tracking-widest text-white disabled:opacity-50">{saving ? "…" : editingId ? t.update : t.save}</button>{editingId && <button type="button" onClick={resetForm} className="border border-[#d9d1c5] px-5 py-3 text-xs">{t.cancel}</button>}</div>
       </form>
-      <div className="mt-12"><h2 className="font-serif text-2xl">{t.yourEvents}</h2><div className="mt-5 space-y-3">{events.length === 0 && <p className="text-sm text-[#777168]">{t.noEvents}</p>}{events.map(event => <article key={event.id} className="flex flex-wrap items-center justify-between gap-4 border border-[#e5ded3] bg-white p-4"><div className="flex items-center gap-4">{(event.event_photos?.find(photo => photo.is_thumbnail) || event.event_photos?.[0]) && <img src={(event.event_photos.find(photo => photo.is_thumbnail) || event.event_photos[0]).public_url} className="h-16 w-20 object-cover" />}<div><h3 className="font-serif text-lg">{event.title}</h3><p className="text-xs text-[#777168]">{event.category} · {event.location} · {event.event_photos?.length || 0} {t.photoCount} · {event.published ? "Published" : "Draft"}</p></div></div><div className="flex gap-2"><button onClick={() => editEvent(event)} className="border border-[#b18b5c] px-4 py-2 text-xs">{t.edit}</button><button onClick={() => void deleteEvent(event)} className="border border-red-200 px-4 py-2 text-xs text-red-700">{t.remove}</button></div></article>)}</div></div></>}
+      <div className="mt-12"><h2 className="font-serif text-2xl">{t.yourEvents}</h2><div className="mt-5 space-y-3">{events.length === 0 && <p className="text-sm text-[#777168]">{t.noEvents}</p>}{events.map(event => <article key={event.id} className="flex flex-wrap items-center justify-between gap-4 border border-[#e5ded3] bg-white p-4"><div className="flex items-center gap-4">{(event.event_photos?.find(photo => photo.is_thumbnail) || event.event_photos?.[0]) && <img src={(event.event_photos.find(photo => photo.is_thumbnail) || event.event_photos[0]).public_url} className="h-16 w-20 object-cover" />}<div><h3 className="font-serif text-lg">{event.title}</h3><p className="text-xs text-[#777168]">{event.category} · {event.location} · {event.event_photos?.length || 0} {t.photoCount} · {event.published ? "Published" : "Draft"}</p></div></div><div className="flex gap-2"><button onClick={() => editEvent(event)} className="border border-[#b18b5c] px-4 py-2 text-xs">{t.edit}</button><button onClick={() => void togglePublished(event)} className="border border-[#d9d1c5] px-4 py-2 text-xs">{event.published ? "Unpublish" : "Publish"}</button><button onClick={() => void deleteEvent(event)} className="border border-red-200 px-4 py-2 text-xs text-red-700">{t.remove}</button></div></article>)}</div></div></>}
       {notice && <p role="status" className="mt-5 text-sm text-[#8b6339]">{notice}</p>}
     </div>
   </section>;
@@ -309,7 +350,7 @@ export function GalleryExperience({ page, language }: Props) {
       </div>
       <div className="mt-6 flex flex-wrap gap-2"><button onClick={() => setCategory("All")} className={"border px-4 py-2 text-xs " + (category === "All" ? "border-[#c6a477] bg-[#a17d4e] text-white" : "border-white/20 text-white/70")}>{t.all}</button>{categories.map(c => <button key={c} onClick={() => setCategory(c)} className={"border px-4 py-2 text-xs " + (category === c ? "border-[#c6a477] bg-[#a17d4e] text-white" : "border-white/20 text-white/70")}>{c}</button>)}</div>
       {locations.length > 0 && <div className="mt-8 border-y border-white/15 py-5"><div className="mb-3 flex flex-wrap items-center justify-between gap-3"><h2 className="text-xs uppercase tracking-[.2em] text-[#e5cda9]">{t.locations}</h2><button onClick={() => { setLocationsTouched(false); setSelectedLocations([]); }} className="text-xs text-white/60 underline">{t.clear}</button></div><div className="flex flex-wrap gap-3">{locations.map(location => <label key={location} className="flex cursor-pointer items-center gap-2 text-xs text-white/80"><input type="checkbox" checked={!locationsTouched || selectedLocations.includes(location)} onChange={() => toggleLocation(location)} className="accent-[#b18b5c]" />{location}</label>)}</div></div>}
-      {loading ? <p className="py-16 text-sm text-white/60">{t.loading}</p> : visibleEvents.length === 0 ? <p className="py-16 text-sm text-white/60">{t.empty}</p> : <div className="mt-10 grid gap-5 sm:grid-cols-2 lg:grid-cols-3">{visibleEvents.map(event => <button key={event.id} onClick={e => { returnFocusRef.current = e.currentTarget; setActiveEvent(event); }} className="group overflow-hidden bg-[#333128] text-left"><div className="overflow-hidden"><img src={(event.event_photos?.find(photo => photo.is_thumbnail) || event.event_photos?.[0])?.public_url || ""} alt={event.title} className="h-64 w-full object-cover transition duration-700 group-hover:scale-105" loading="lazy" /></div><div className="p-5"><p className="text-[9px] uppercase tracking-[.2em] text-[#d1b48b]">{event.category}</p><h2 className="mt-2 font-serif text-2xl">{event.title}</h2><p className="mt-2 text-xs text-white/65">{event.location}{event.event_date ? " · " + new Date(event.event_date + "T00:00:00").toLocaleDateString(language === "el" ? "el-GR" : "en-GB") : ""}</p><p className="mt-3 text-[10px] text-white/45">{event.event_photos?.length || 0} {t.photoCount} · {t.open} ↗</p></div></button>)}</div>}
+      {loading ? <p className="py-16 text-sm text-white/60">{t.loading}</p> : visibleEvents.length === 0 ? <p className="py-16 text-sm text-white/60">{t.empty}</p> : <div className="mt-10 grid gap-5 sm:grid-cols-2 lg:grid-cols-3">{visibleEvents.map(event => <button key={event.id} onClick={e => { returnFocusRef.current = e.currentTarget; recordGalleryView(event.id); setActiveEvent(event); }} className="group overflow-hidden bg-[#333128] text-left"><div className="overflow-hidden"><img src={(event.event_photos?.find(photo => photo.is_thumbnail) || event.event_photos?.[0])?.public_url || ""} alt={event.title} className="h-64 w-full object-cover transition duration-700 group-hover:scale-105" loading="lazy" /></div><div className="p-5"><p className="text-[9px] uppercase tracking-[.2em] text-[#d1b48b]">{event.category}</p><h2 className="mt-2 font-serif text-2xl">{event.title}</h2><p className="mt-2 text-xs text-white/65">{event.location}{event.event_date ? " · " + new Date(event.event_date + "T00:00:00").toLocaleDateString(language === "el" ? "el-GR" : "en-GB") : ""}</p><p className="mt-3 text-[10px] text-white/45">{event.event_photos?.length || 0} {t.photoCount} · {t.open} ↗</p></div></button>)}</div>}
     </div>
     {activeEvent && <div className="fixed inset-0 z-[100] overflow-y-auto bg-black/90 p-5 sm:p-10" role="dialog" aria-modal="true" aria-label={activeEvent.title}><div className="mx-auto max-w-6xl"><button onClick={() => { setActiveEvent(null); setActivePhotoIndex(null); setZoomed(false); }} className="mb-6 border border-white/30 px-4 py-2 text-xs text-white">× {t.back}</button><p className="text-[10px] uppercase tracking-[.2em] text-[#d1b48b]">{activeEvent.category} · {activeEvent.location}</p><h2 className="mt-2 font-serif text-4xl text-white">{activeEvent.title}</h2>{activeEvent.description && <p className="mt-3 max-w-2xl text-sm text-white/70">{activeEvent.description}</p>}<div className="mt-8 grid grid-cols-2 gap-3 md:grid-cols-3">{[...(activeEvent.event_photos || [])].sort((a,b)=>(a.sort_order??0)-(b.sort_order??0)).map((photo,index)=><button type="button" key={photo.id} onClick={()=>{setActivePhotoIndex(index);setZoomed(false);setViewerImageError(false);}} aria-label={`Open photo ${index+1}`} className="group overflow-hidden text-left"><img src={photo.public_url} alt={`${activeEvent.title} ${index+1}`} className="h-56 w-full object-cover transition duration-500 group-hover:scale-105 sm:h-72" loading="lazy" /></button>)}</div></div></div>}
     {activeEvent && activePhotoIndex !== null && activeEvent.event_photos?.[activePhotoIndex] && <div className="fixed inset-0 z-[120] flex flex-col bg-black text-white" role="dialog" aria-modal="true" aria-label="Full-screen photo viewer" onTouchStart={e=>setTouchStartX(e.touches[0]?.clientX??null)} onTouchEnd={e=>{if(touchStartX!==null){const delta=e.changedTouches[0].clientX-touchStartX;if(Math.abs(delta)>50){setActivePhotoIndex(index=>Math.max(0,Math.min((activeEvent.event_photos?.length||1)-1,(index??0)+(delta<0?1:-1))));setZoomed(false);setViewerImageError(false);}}setTouchStartX(null);}}>
