@@ -74,7 +74,7 @@ export function GalleryExperience({ page, language }: Props) {
     if (!supabase) return;
     setNotice("");
     const { error } = await supabase.auth.signInWithPassword({ email, password });
-    if (error) setNotice(t.signInError);
+    if (error) setNotice(error.message);
   };
   const signOut = async () => { if (supabase) await supabase.auth.signOut(); setIsAdmin(false); };
   const resetForm = () => { setForm({ title: "", category: categories[0], event_date: "", location: "", description: "", published: true }); setFiles(null); setEditingId(null); };
