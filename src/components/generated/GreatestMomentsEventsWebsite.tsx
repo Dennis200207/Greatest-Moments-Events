@@ -286,7 +286,20 @@ export const GreatestMomentsEventsWebsite = () => {
         </div></section>)} 
 
         {page !== "admin" && <div id="gallery" className="scroll-mt-24"><GalleryExperience page="gallery" language={language} /></div>}
-        {page === "admin" && <GalleryExperience page="admin" language={language} />}
+        {page === "admin" && (<>
+          <div className="border-b border-[#e9e3d9] bg-[#f3efe8] px-6 py-5">
+            <div className="mx-auto flex max-w-7xl flex-wrap items-center justify-between gap-4">
+              <div>
+                <p className="text-[10px] uppercase tracking-[.24em] text-[#a17d4e]">Admin preview</p>
+                <p className="mt-1 text-sm text-[#777168]">See the public website exactly as visitors do, without signing out.</p>
+              </div>
+              <a href="#/home" className="inline-flex items-center gap-2 border border-[#a17d4e] bg-[#26251f] px-5 py-3 text-[10px] font-medium uppercase tracking-[.16em] text-white transition hover:bg-[#a17d4e]">
+                <span aria-hidden="true">↗</span> View site as visitor
+              </a>
+            </div>
+          </div>
+          <GalleryExperience page="admin" language={language} />
+        </>)}
 
         {page !== "admin" && (<section id="contact" className="px-6 py-24 lg:px-8"><div className="mx-auto grid max-w-7xl gap-12 md:grid-cols-2"><div><p className="text-[10px] uppercase tracking-[.3em] text-[#a17d4e]">Let's make it memorable</p><h2 className="mt-4 font-serif text-4xl sm:text-5xl">We'd love to hear<br /><em className="text-[#a17d4e]">what you're dreaming of.</em></h2><p className="mt-6 max-w-md text-sm leading-7 text-[#777168]">Tell us about your occasion and let's start planning something special.</p></div><div className="space-y-6 border-l border-[#e7e1d8] pl-0 md:pl-10"><div><p className="text-[9px] uppercase tracking-[.2em] text-[#a17d4e]">Call us</p><a href="tel:+306977955583" className="mt-2 block font-serif text-2xl">+30 697 795 5583</a></div><div><p className="text-[9px] uppercase tracking-[.2em] text-[#a17d4e]">Visit us</p><p className="mt-2 font-serif text-xl">Aristotelous 6, Agioi Anargyroi<br />135 62, Athens, Greece</p></div><div><p className="text-[9px] uppercase tracking-[.2em] text-[#a17d4e]">Follow our work</p><a href="https://www.facebook.com/greatestmomentsevents" target="_blank" rel="noreferrer" className="mt-2 inline-block font-serif text-xl underline decoration-[#b18b5c] underline-offset-4">Facebook ↗</a></div><a href="https://www.google.com/maps/search/?api=1&query=Aristotelous+6+Agioi+Anargyroi+13562+Greece" target="_blank" rel="noreferrer" className="inline-block bg-[#292720] px-7 py-4 text-[10px] uppercase tracking-[.2em] text-white hover:bg-[#a17d4e]">Get directions ↗</a></div></div></section>)} 
       </main>
