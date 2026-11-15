@@ -88,6 +88,10 @@ export const GreatestMomentsEventsWebsite = () => {
   const [imageOverrides, setImageOverrides] = useState({});
   const [editorOpen, setEditorOpen] = useState(false);
   const [isSiteAdmin, setIsSiteAdmin] = useState(false);
+  const [isVisitorPreview, setIsVisitorPreview] = useState(false);
+  useEffect(() => {
+    if (page === "admin") setIsVisitorPreview(false);
+  }, [page]);
   useEffect(() => {
     const client = supabase;
     if (!client) { setIsSiteAdmin(false); return; }
@@ -293,7 +297,7 @@ export const GreatestMomentsEventsWebsite = () => {
                 <p className="text-[10px] uppercase tracking-[.24em] text-[#a17d4e]">Admin preview</p>
                 <p className="mt-1 text-sm text-[#777168]">See the public website exactly as visitors do, without signing out.</p>
               </div>
-              <a href="#/home" className="inline-flex items-center gap-2 border border-[#a17d4e] bg-[#26251f] px-5 py-3 text-[10px] font-medium uppercase tracking-[.16em] text-white transition hover:bg-[#a17d4e]">
+              <a href="#/home" onClick={() => setIsVisitorPreview(true)} className="inline-flex items-center gap-2 border border-[#a17d4e] bg-[#26251f] px-5 py-3 text-[10px] font-medium uppercase tracking-[.16em] text-white transition hover:bg-[#a17d4e]">
                 <span aria-hidden="true">↗</span> View site as visitor
               </a>
             </div>
@@ -319,7 +323,7 @@ export const GreatestMomentsEventsWebsite = () => {
           <p className="mt-5 text-[10px] leading-5 text-[#918a80]">Important: this is a local preview editor. Your choices are saved only in this browser on this device; they do not change the published website for other visitors. Publishing permanent changes requires a connected website media library/CMS or an update to the site source.</p>
         </div>
       </div>}
-      <footer className="bg-[#26251f] px-6 py-8 text-center text-white/60"><p className="font-serif text-xl tracking-[.12em] text-white">GREATEST MOMENTS</p><p className="mt-2 text-[9px] uppercase tracking-[.3em]">Events · Catering · Design</p><p className="mt-5 text-[10px]">© {new Date().getFullYear()} Greatest Moments Events. All rights reserved.</p><div className="mt-4 flex justify-center gap-5">{isSiteAdmin && <button onClick={() => { if (isSiteAdmin) setEditorOpen(true); }} className="border-b border-[#b18b5c] pb-1 text-[9px] uppercase tracking-[.2em] text-[#e5cda9]">Photo editor</button>}<a href="#/admin" className="border-b border-white/20 pb-1 text-[9px] uppercase tracking-[.2em] text-white/40">Admin</a></div></footer>
+      <footer className="bg-[#26251f] px-6 py-8 text-center text-white/60"><p className="font-serif text-xl tracking-[.12em] text-white">GREATEST MOMENTS</p><p className="mt-2 text-[9px] uppercase tracking-[.3em]">Events · Catering · Design</p><p className="mt-5 text-[10px]">© {new Date().getFullYear()} Greatest Moments Events. All rights reserved.</p><div className="mt-4 flex justify-center gap-5">{isSiteAdmin && !isVisitorPreview && <button onClick={() => { if (isSiteAdmin) setEditorOpen(true); }} className="border-b border-[#b18b5c] pb-1 text-[9px] uppercase tracking-[.2em] text-[#e5cda9]">Photo editor</button>}<a href="#/admin" className="border-b border-white/20 pb-1 text-[9px] uppercase tracking-[.2em] text-white/40">Admin</a></div></footer>
       <a href="https://wa.me/306977955583" target="_blank" rel="noreferrer" aria-label="Chat on WhatsApp" className="fixed bottom-5 right-5 z-50 flex h-14 w-14 items-center justify-center rounded-full bg-[#a17d4e] text-xl text-white shadow-xl transition hover:scale-105">✆</a>
     </div></Translate>;
 };
