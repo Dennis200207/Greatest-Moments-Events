@@ -84,15 +84,16 @@ export const GreatestMomentsEventsWebsite = () => {
   const [editorOpen, setEditorOpen] = useState(false);
   const [isSiteAdmin, setIsSiteAdmin] = useState(false);
   useEffect(() => {
-    if (!supabase) { setIsSiteAdmin(false); return; }
+    const client = supabase;
+    if (!client) { setIsSiteAdmin(false); return; }
     let alive = true;
     const checkAdmin = async (userId?: string) => {
       if (!userId) { if (alive) { setIsSiteAdmin(false); setEditorOpen(false); } return; }
-      const { data, error } = await supabase.from("admin_users").select("user_id").eq("user_id", userId).maybeSingle();
+      const { data, error } = await client.from("admin_users").select("user_id").eq("user_id", userId).maybeSingle();
       if (alive) { const allowed = !error && !!data; setIsSiteAdmin(allowed); if (!allowed) setEditorOpen(false); }
     };
-    supabase.auth.getSession().then(({ data }) => { void checkAdmin(data.session?.user?.id); });
-    const { data: authListener } = supabase.auth.onAuthStateChange((_event, session) => { void checkAdmin(session?.user?.id); });
+    client.auth.getSession().then(({ data }) => { void checkAdmin(data.session?.user?.id); });
+    const { data: authListener } = client.auth.onAuthStateChange((_event, session) => { void checkAdmin(session?.user?.id); });
     return () => { alive = false; authListener.subscription.unsubscribe(); };
   }, []);
   const [uploadNotice, setUploadNotice] = useState("");
