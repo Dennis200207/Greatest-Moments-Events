@@ -179,3 +179,38 @@ img.broken-image-fallback {
     opacity: 1;
   }
 }
+
+
+/* Greatest Moments Events night mode */
+.greatest-moments-site.site-dark {
+  background-color: #171713 !important;
+  color: #eee9df !important;
+}
+.site-dark [class*="bg-[#faf8f4]"],
+.site-dark [class*="bg-[#faf8f4]/"] { background-color: #171713 !important; }
+.site-dark [class*="bg-white"] { background-color: #24231f !important; }
+.site-dark [class*="bg-[#f5f1ea]"],
+.site-dark [class*="bg-[#f5f0e8]"] { background-color: #292720 !important; }
+.site-dark [class*="text-[#24231f]"],
+.site-dark [class*="text-[#292720]"] { color: #eee9df !important; }
+.site-dark [class*="text-[#777168]"],
+.site-dark [class*="text-[#6f6a61]"],
+.site-dark [class*="text-[#918a80]"] { color: #c1b9ac !important; }
+.site-dark [class*="border-[#e9e3d9]"],
+.site-dark [class*="border-[#e7e1d8]"],
+.site-dark [class*="border-[#e5ded3]"],
+.site-dark [class*="border-[#ded6ca]"],
+.site-dark [class*="border-[#d9d1c5]"] { border-color: #49453c !important; }
+.site-dark input,
+.site-dark textarea,
+.site-dark select { background-color: #24231f; color: #eee9df; border-color: #625b4f; }
+.site-dark input::placeholder,
+.site-dark textarea::placeholder { color: #aaa194; }
+.site-dark header { background-color: rgb(23 23 19 / 95%) !important; border-color: #49453c !important; }
+.site-dark main,
+.site-dark section { color: #eee9df; }
+.site-dark .bg-\\[\\#26251f\\] { background-color: #10100e !important; }
+.site-dark [class*="bg-[#26251f]"] { background-color: #10100e !important; }
+.site-dark [class*="bg-[#292720]"] { background-color: #38352d !important; }
+.site-dark [class*="text-white"] { color: #f8f5ef; }
+.site-dark img { color-scheme: light; }
